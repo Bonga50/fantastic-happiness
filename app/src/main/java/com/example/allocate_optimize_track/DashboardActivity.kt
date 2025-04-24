@@ -6,6 +6,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.fragment.app.Fragment
 import com.example.allocate_optimize_track.databinding.ActivityDashboardBinding
 import com.example.allocate_optimize_track.ui.LoginActivity
 import com.google.firebase.Firebase
@@ -27,16 +28,46 @@ class DashboardActivity : AppCompatActivity() {
         }
         auth = Firebase.auth
 
-        // Get the email passed from Login/SignUp Activity
-        val userEmail = intent.getStringExtra("USER_EMAIL")
+        binding.bottomNavigation.setOnItemSelectedListener { item ->
+            var selectedFragment: Fragment? = null
 
-        // Display the email
-        binding.textViewUserEmail.text = userEmail ?: "Email not found"
+            when (item.itemId) {
+                R.id.nav_home -> {
+                    selectedFragment = HomeFragment()
+                }
+                R.id.nav_categories -> {
+                    selectedFragment = CategoriesFragment()
+                }
+                R.id.nav_expenses -> {
+                    selectedFragment = ExpensesFragment()
+                }
+                R.id.nav_logout -> {
+                    performLogout()
+                    return@setOnItemSelectedListener false // Don't select logout visually, we are leaving
+                }
+            }
 
-        // Logout Button Click
-        binding.buttonLogout.setOnClickListener {
-            performLogout()
+            // Replace the fragment if a valid one was selected
+            if (selectedFragment != null) {
+                replaceFragment(selectedFragment)
+                return@setOnItemSelectedListener true // Indicate selection was handled
+            }
+
+            false // Default: Indicate selection was not handled (shouldn't happen here)
         }
+
+        // Load the default fragment (Home) when the activity is created
+        if (savedInstanceState == null) { // Only load default if not restoring state
+            binding.bottomNavigation.selectedItemId = R.id.nav_home // Set default selection
+            replaceFragment(HomeFragment())
+        }
+    }
+
+    private fun replaceFragment(fragment: Fragment) {
+        supportFragmentManager.beginTransaction()
+            .replace(R.id.fragment_container, fragment) // Use the ID of your FragmentContainerView
+            // .addToBackStack(null) // Optional: Add transaction to back stack
+            .commit()
     }
 
     private fun performLogout() {

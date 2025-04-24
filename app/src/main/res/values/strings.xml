@@ -1,3 +1,14 @@
 <resources>
     <string name="app_name">Allocate_Optimize_Track</string>
+
+    <string name="menu_home">Home</string>
+    <string name="menu_categories">Categories</string>
+    <string name="menu_expenses">Expenses</string>
+    <string name="menu_logout">Logout</string>
+
+    <string name="title_home">Home Fragment</string>
+    <string name="title_categories">Categories Fragment</string>
+    <string name="title_expenses">Expenses Fragment</string>
+    <!-- TODO: Remove or change this placeholder text -->
+    <string name="hello_blank_fragment">Hello blank fragment</string>
 </resources>

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/nav_home"
+        android:icon="@drawable/home_24px"
+        android:title="@string/menu_home" />
+
+    <item
+        android:id="@+id/nav_categories"
+        android:icon="@drawable/category_24px"
+        android:title="@string/menu_categories" />
+
+    <item
+        android:id="@+id/nav_expenses"
+        android:icon="@drawable/attach_money_24px"
+        android:title="@string/menu_expenses" />
+
+    <item
+        android:id="@+id/nav_logout"
+        android:icon="@drawable/logout_24px"
+        android:title="@string/menu_logout" />
+</menu>
