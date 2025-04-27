@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Define path for camera photos in app's cache directory -->
+    <cache-path name="shared_images" path="images/"/>
+    <!-- Or use files-path for internal storage, external-path for public external storage -->
+    <!-- <files-path name="my_images" path="images/"/> -->
+</paths>

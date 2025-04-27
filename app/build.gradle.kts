@@ -3,6 +3,9 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.google.gms.google.services)
+    id ("kotlin-kapt")
+    id("com.google.devtools.ksp")
+    id("androidx.navigation.safeargs.kotlin")
 }
 
 android {
@@ -67,4 +70,21 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
     implementation(libs.material.v1110)
+    implementation (libs.kotlinx.coroutines.android)
+
+    // Lifecycle components for ViewModel and LiveData
+    implementation (libs.androidx.lifecycle.viewmodel.ktx) // Or latest
+    implementation (libs.androidx.lifecycle.livedata.ktx)// Or latest
+    implementation (libs.androidx.lifecycle.runtime.ktx.v270)// Or latest
+
+    implementation (libs.androidx.recyclerview)
+
+
+    implementation (libs.androidx.room.runtime)
+    ksp(libs.androidx.room.compiler)
+
+    implementation (libs.androidx.fragment.ktx)
+    implementation( libs.androidx.navigation.fragment)
+    implementation (libs.androidx.navigation.ui)
+    implementation(libs.glide)
 }
