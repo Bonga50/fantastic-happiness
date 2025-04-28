@@ -33,4 +33,8 @@ class ExpenseRepository(private val expenseDao: ExpenseDao) {
     fun getCategoryTotalsForUserAndDateRange(userId: String, startDate: Long, endDate: Long): LiveData<List<CategoryTotal>> {
         return expenseDao.getCategoryTotalsForUserAndDateRange(userId, startDate, endDate)
     }
+
+    fun getFilteredExpensesWithCategoryForUser(userId: String, startDate: Long, endDate: Long): LiveData<List<ExpenseWithCategory>> {
+        return expenseDao.getFilteredExpensesWithCategoryForUser(userId, startDate, endDate)
+    }
 }

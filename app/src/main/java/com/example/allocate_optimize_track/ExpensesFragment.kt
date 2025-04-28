@@ -68,17 +68,20 @@ class ExpensesFragment : Fragment() {
         //       to reflect the date range. For large datasets, you might want to also filter
         //       this list based on dates, requiring another MediatorLiveData setup similar to totals.
         //       For now, we display all expenses and the totals separately reflect the selected range.
-        expenseViewModel.allExpensesWithCategory.observe(viewLifecycleOwner, Observer { expenses ->
-            Log.d("ExpensesFragment", "All expenses updated: ${expenses?.size ?: 0}")
-            textViewListTitle.text = "All Expenses (${expenses?.size ?: 0})"
-            expenseAdapter.submitList(expenses)
+
+        // --- Observe the NEW Filtered Expenses List ---
+        expenseViewModel.filteredExpensesWithCategory.observe(viewLifecycleOwner, Observer { expenses ->
+            // This list is now filtered by the selected date range
+            Log.d("ExpensesFragment", "Filtered expenses updated: ${expenses?.size ?: 0}")
+            textViewListTitle.text = "Expenses (${expenses?.size ?: 0})" // Update title with count
+            expenseAdapter.submitList(expenses) // Submit the filtered list
         })
 
-        // Observe date changes to update the display TextView
+        // Observe date changes to update the display TextView (remains the same)
         expenseViewModel.startDateMillis.observe(viewLifecycleOwner) { updateDateRangeDisplay() }
         expenseViewModel.endDateMillis.observe(viewLifecycleOwner) { updateDateRangeDisplay() }
 
-        // Observe Grand Total
+        // Observe Grand Total (remains the same)
         expenseViewModel.grandTotal.observe(viewLifecycleOwner, Observer { total ->
             updateGrandTotalDisplay(total)
         })

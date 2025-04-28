@@ -47,6 +47,17 @@ interface ExpenseDao {
     """)
     fun getCategoryTotalsForUserAndDateRange(userId: String, startDate: Long, endDate: Long): LiveData<List<CategoryTotal>>
 
+    // --- Query for filtered Expenses with Category Name ---
+    @Transaction
+    @Query("""
+        SELECT e.*, c.name as categoryName
+        FROM expenses e
+        INNER JOIN categories c ON e.categoryId = c.id
+        WHERE e.userId = :userId AND e.date BETWEEN :startDate AND :endDate
+        ORDER BY e.date DESC
+    """)
+    fun getFilteredExpensesWithCategoryForUser(userId: String, startDate: Long, endDate: Long): LiveData<List<ExpenseWithCategory>>
+
     // --- Query for Grand Total within a Date Range ---
     @Query("""
         SELECT SUM(e.amount)

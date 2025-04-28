@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [Category::class, Expense::class], version = 4, exportSchema = true) // Add Expense, increment version
+@Database(entities = [Category::class, Expense::class], version = 5, exportSchema = true) // Add Expense, increment version
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun categoryDao(): CategoryDao
@@ -61,7 +61,8 @@ abstract class AppDatabase : RoomDatabase() {
                     "app_database"
                 )
                     // *** ADD THE NEW MIGRATION ***
-                    .addMigrations( MIGRATION_3_4,MIGRATION_3_4) // Add all migrations needed
+                    .fallbackToDestructiveMigration()
+                    //.addMigrations( MIGRATION_3_4,MIGRATION_3_4) // Add all migrations needed
                     // Or use .fallbackToDestructiveMigration() for development
                     .build()
                 INSTANCE = instance

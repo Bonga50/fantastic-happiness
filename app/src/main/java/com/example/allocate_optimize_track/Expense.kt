@@ -7,14 +7,13 @@ import androidx.room.PrimaryKey
 
 @Entity(
     tableName = "expenses",
-    // Define foreign key relationship with Categories
     foreignKeys = [ForeignKey(
         entity = Category::class,
-        parentColumns = ["id"], // Column in the Category table
+        parentColumns = ["id"],       // Column in the Category table
         childColumns = ["categoryId"], // Column in the Expense table
-        onDelete = ForeignKey.RESTRICT // Prevent deleting category if expenses exist (or use CASCADE, SET_NULL)
+        // onDelete = ForeignKey.RESTRICT // OLD or DEFAULT value
+        onDelete = ForeignKey.CASCADE // **** CHANGE THIS LINE ****
     )],
-    // Index categoryId for faster lookups
     indices = [Index("categoryId"), Index("userId")]
 )
 data class Expense(

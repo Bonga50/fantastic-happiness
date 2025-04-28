@@ -39,7 +39,7 @@ class ExpenseViewModel(application: Application) : AndroidViewModel(application)
 
     // --- LiveData for displaying Category Totals (using MediatorLiveData) ---
     val categoryTotals: MediatorLiveData<List<CategoryTotal>> = MediatorLiveData()
-
+    val filteredExpensesWithCategory: MediatorLiveData<List<ExpenseWithCategory>> = MediatorLiveData()
     // LiveData for Expenses (with category names) for the current user
     val allExpensesWithCategory: LiveData<List<ExpenseWithCategory>> = _currentUserId.switchMap { userId ->
         if (userId != null) {
@@ -66,6 +66,12 @@ class ExpenseViewModel(application: Application) : AndroidViewModel(application)
         val sourceUserId = _currentUserId
         val sourceStartDate = _startDateMillis
         val sourceEndDate = _endDateMillis
+
+        // Observe sources for Filtered Expenses List
+        filteredExpensesWithCategory.addSource(sourceUserId) { fetchFilteredExpensesList(it, sourceStartDate.value, sourceEndDate.value) }
+        filteredExpensesWithCategory.addSource(sourceStartDate) { fetchFilteredExpensesList(sourceUserId.value, it, sourceEndDate.value) }
+        filteredExpensesWithCategory.addSource(sourceEndDate) { fetchFilteredExpensesList(sourceUserId.value, sourceStartDate.value, it) }
+
 
         // Observe sources for Category Totals
         categoryTotals.addSource(sourceUserId) { fetchCategoryTotals(it, sourceStartDate.value, sourceEndDate.value) }
@@ -205,4 +211,23 @@ class ExpenseViewModel(application: Application) : AndroidViewModel(application)
             null // Don't return expense if it doesn't belong to the user
         }
     }
+
+    // --- Helper to fetch Filtered Expenses List ---
+    private var currentFilteredListSource: LiveData<List<ExpenseWithCategory>>? = null
+    private fun fetchFilteredExpensesList(userId: String?, startDate: Long?, endDate: Long?) {
+        currentFilteredListSource?.let { filteredExpensesWithCategory.removeSource(it) }
+
+        if (userId != null && startDate != null && endDate != null) {
+            val newSource = expenseRepository.getFilteredExpensesWithCategoryForUser(userId, startDate, endDate)
+            currentFilteredListSource = newSource
+            filteredExpensesWithCategory.addSource(newSource) { expenses ->
+                filteredExpensesWithCategory.value = expenses // Post the filtered list
+            }
+            Log.d("ExpenseViewModel", "Fetching filtered expenses for $userId from $startDate to $endDate")
+        } else {
+            filteredExpensesWithCategory.value = emptyList() // Post empty list if input invalid
+            Log.d("ExpenseViewModel", "Not fetching filtered expenses - invalid input.")
+        }
+    }
+
 }
