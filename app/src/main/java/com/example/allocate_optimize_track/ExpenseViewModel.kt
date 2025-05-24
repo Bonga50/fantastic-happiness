@@ -1,6 +1,8 @@
 package com.example.allocate_optimize_track
 
 import android.app.Application
+import android.content.ContentResolver
+import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
@@ -15,18 +17,11 @@ import kotlinx.coroutines.launch
 import java.util.Calendar
 
 class ExpenseViewModel(application: Application) : AndroidViewModel(application) {
+    private val categoryRepository = CategoryRepository() // For category names
+    private val expenseRepository = ExpenseRepository(categoryRepository) // Inject
+    private val auth = FirebaseAuth.getInstance()
 
-    private val auth: FirebaseAuth = Firebase.auth
-    val grandTotal: MediatorLiveData<Double?> = MediatorLiveData()
-    // Repositories using lazy initialization
-    private val expenseRepository: ExpenseRepository by lazy {
-        val expenseDao = AppDatabase.getDatabase(application).expenseDao()
-        ExpenseRepository(expenseDao)
-    }
-    private val categoryRepository: CategoryRepository by lazy { // Added Category Repository
-        val categoryDao = AppDatabase.getDatabase(application).categoryDao()
-        CategoryRepository(categoryDao)
-    }
+    private val _currentUserId = MutableLiveData<String?>() // Still useful
 
     private val _startDateMillis = MutableLiveData<Long>()
     val startDateMillis: LiveData<Long> get() = _startDateMillis // Expose immutable LiveData
@@ -34,54 +29,161 @@ class ExpenseViewModel(application: Application) : AndroidViewModel(application)
     private val _endDateMillis = MutableLiveData<Long>()
     val endDateMillis: LiveData<Long> get() = _endDateMillis
 
-    // LiveData for current user ID
-    private val _currentUserId = MutableLiveData<String?>()
+    // Raw list of all expenses for the user from Firebase
+    private val _rawExpensesWithCategory: LiveData<List<ExpenseWithCategory>> =
+        _currentUserId.switchMap { userId ->
+            if (userId != null) {
+                expenseRepository.getExpensesWithCategoryForUser() // Gets all
+            } else {
+                MutableLiveData(emptyList())
+            }
+        }
 
-    // --- LiveData for displaying Category Totals (using MediatorLiveData) ---
-    val categoryTotals: MediatorLiveData<List<CategoryTotal>> = MediatorLiveData()
+    // Filtered list based on date range (client-side filtering)
     val filteredExpensesWithCategory: MediatorLiveData<List<ExpenseWithCategory>> = MediatorLiveData()
-    // LiveData for Expenses (with category names) for the current user
-    val allExpensesWithCategory: LiveData<List<ExpenseWithCategory>> = _currentUserId.switchMap { userId ->
-        if (userId != null) {
-            expenseRepository.getExpensesWithCategoryForUser(userId)
-        } else {
-            MutableLiveData(emptyList())
-        }
-    }
+    val categoryTotals: MediatorLiveData<List<CategoryTotal>> = MediatorLiveData()
+    val grandTotal: MediatorLiveData<Double?> = MediatorLiveData()
 
-    // LiveData for Categories for the current user (for the dropdown)
-    val userCategories: LiveData<List<Category>> = _currentUserId.switchMap { userId ->
-        if (userId != null) {
-            categoryRepository.getCategoriesForUser(userId) // Get categories for the user
-        } else {
-            MutableLiveData(emptyList())
-        }
-    }
+    val userCategories: LiveData<List<Category>> = categoryRepository.getCategoriesForCurrentUser() // For dropdown
+
+    private val _saveExpenseStatus = MutableLiveData<FirebaseResult<String>?>() // Make it nullable
+    val saveExpenseStatus: LiveData<FirebaseResult<String>?> = _saveExpenseStatus
+
+    // LiveData for daily spending (Map: Day Timestamp -> Total Amount)
+    val dailySpendingOverPeriod: MediatorLiveData<Map<Long, Double>> = MediatorLiveData()
+
+    // LiveData for daily spending broken down by category (Map: Day Timestamp -> Map<CategoryName, Amount>)
+    val dailyCategorySpendingOverPeriod: MediatorLiveData<Map<Long, Map<String, Double>>> = MediatorLiveData()
 
     init {
-        // Set the initial user ID
-        _currentUserId.value = auth.currentUser?.email
-        setDefaultDates() // Set initial dates (e.g., current month)
+        _currentUserId.value = auth.currentUser?.uid
+        if (_startDateMillis.value == null || _endDateMillis.value == null) {
+            setDefaultDates()
+        } else {
+            Log.d("ExpenseViewModel", "Dates already initialized, skipping setDefaultDates. Start: ${_startDateMillis.value}, End: ${_endDateMillis.value}")
+        }
+// Your existing function
 
-        val sourceUserId = _currentUserId
-        val sourceStartDate = _startDateMillis
-        val sourceEndDate = _endDateMillis
+        // Combine and filter client-side
+        filteredExpensesWithCategory.addSource(_rawExpensesWithCategory) { applyFilters() }
+        filteredExpensesWithCategory.addSource(startDateMillis) { applyFilters() }
+        filteredExpensesWithCategory.addSource(endDateMillis) { applyFilters() }
 
-        // Observe sources for Filtered Expenses List
-        filteredExpensesWithCategory.addSource(sourceUserId) { fetchFilteredExpensesList(it, sourceStartDate.value, sourceEndDate.value) }
-        filteredExpensesWithCategory.addSource(sourceStartDate) { fetchFilteredExpensesList(sourceUserId.value, it, sourceEndDate.value) }
-        filteredExpensesWithCategory.addSource(sourceEndDate) { fetchFilteredExpensesList(sourceUserId.value, sourceStartDate.value, it) }
+        // These also depend on the client-side filtered list
+        categoryTotals.addSource(filteredExpensesWithCategory) { expenses -> calculateCategoryTotals(expenses) }
+        grandTotal.addSource(filteredExpensesWithCategory) { expenses -> calculateGrandTotal(expenses) }
+
+        // Observe filtered expenses to calculate daily spending
+        dailySpendingOverPeriod.addSource(filteredExpensesWithCategory) { expenses ->
+            calculateDailySpending(expenses)
+        }
+        dailyCategorySpendingOverPeriod.addSource(filteredExpensesWithCategory) { expenses ->
+            calculateDailyCategorySpending(expenses)
+        }
+    }
+
+    private fun calculateDailySpending(expenses: List<ExpenseWithCategory>?) {
+        if (expenses == null) {
+            dailySpendingOverPeriod.value = emptyMap()
+            return
+        }
+        val dailyTotals = expenses
+            .groupBy {
+                // Normalize date to the start of the day for grouping
+                val calendar = Calendar.getInstance()
+                calendar.timeInMillis = it.expense.date
+                calendar.set(Calendar.HOUR_OF_DAY, 0)
+                calendar.set(Calendar.MINUTE, 0)
+                calendar.set(Calendar.SECOND, 0)
+                calendar.set(Calendar.MILLISECOND, 0)
+                calendar.timeInMillis // Key is the timestamp for the start of the day
+            }
+            .mapValues { entry ->
+                entry.value.sumOf { it.expense.amount }
+            }
+            .toSortedMap() // Sort by date
+        dailySpendingOverPeriod.value = dailyTotals
+        Log.d("ExpenseViewModel", "Calculated daily spending: $dailyTotals")
+    }
+
+    private fun calculateDailyCategorySpending(expenses: List<ExpenseWithCategory>?) {
+        if (expenses == null) {
+            dailyCategorySpendingOverPeriod.value = emptyMap()
+            return
+        }
+        val dailyCategoryTotals = expenses
+            .groupBy { // Group by day (start of day timestamp)
+                val calendar = Calendar.getInstance()
+                calendar.timeInMillis = it.expense.date
+                calendar.set(Calendar.HOUR_OF_DAY, 0); calendar.set(Calendar.MINUTE, 0); calendar.set(Calendar.SECOND, 0); calendar.set(Calendar.MILLISECOND, 0)
+                calendar.timeInMillis
+            }
+            .mapValues { dailyEntry -> // For each day
+                dailyEntry.value // List of ExpenseWithCategory for that day
+                    .groupBy { it.categoryName ?: "Uncategorized" } // Group by category name
+                    .mapValues { categoryEntry -> // For each category within that day
+                        categoryEntry.value.sumOf { it.expense.amount } // Sum amounts for that category on that day
+                    }
+            }
+            .toSortedMap() // Sort by date
+        dailyCategorySpendingOverPeriod.value = dailyCategoryTotals
+        Log.d("ExpenseViewModel", "Calculated daily category spending: $dailyCategoryTotals")
+    }
+
+    private fun applyFilters() {
+        val rawList = _rawExpensesWithCategory.value ?: emptyList()
+        val start = startDateMillis.value
+        val end = endDateMillis.value
+
+        if (start != null && end != null) {
+            val filtered = rawList.filter { it.expense.date in start..end }
+            filteredExpensesWithCategory.value = filtered
+        } else {
+            filteredExpensesWithCategory.value = rawList // Show all if dates not set
+        }
+    }
+
+    private fun calculateCategoryTotals(expenses: List<ExpenseWithCategory>?) {
+        if (expenses == null) {
+            categoryTotals.value = emptyList()
+            return
+        }
+        val totalsMap = expenses
+            .groupBy { it.expense.categoryId to (it.categoryName ?: "Unknown") }
+            .map { (key, groupedExpenses) ->
+                CategoryTotal(
+                    categoryId = key.first,
+                    categoryName = key.second,
+                    totalAmount = groupedExpenses.sumOf { it.expense.amount }
+                )
+            }
+        categoryTotals.value = totalsMap.sortedByDescending { it.totalAmount }
+    }
+
+    private fun calculateGrandTotal(expenses: List<ExpenseWithCategory>?) {
+        grandTotal.value = expenses?.sumOf { it.expense.amount }
+    }
 
 
-        // Observe sources for Category Totals
-        categoryTotals.addSource(sourceUserId) { fetchCategoryTotals(it, sourceStartDate.value, sourceEndDate.value) }
-        categoryTotals.addSource(sourceStartDate) { fetchCategoryTotals(sourceUserId.value, it, sourceEndDate.value) }
-        categoryTotals.addSource(sourceEndDate) { fetchCategoryTotals(sourceUserId.value, sourceStartDate.value, it) }
+    fun insertExpense(expense: Expense, imageUri: Uri?, contentResolver: ContentResolver) = viewModelScope.launch {
+        _saveExpenseStatus.value = FirebaseResult.Loading
+        val result = expenseRepository.insert(expense, imageUri, contentResolver)
+        _saveExpenseStatus.value = result
+    }
 
-        // Observe sources for Grand Total
-        grandTotal.addSource(sourceUserId) { fetchGrandTotal(it, sourceStartDate.value, sourceEndDate.value) }
-        grandTotal.addSource(sourceStartDate) { fetchGrandTotal(sourceUserId.value, it, sourceEndDate.value) }
-        grandTotal.addSource(sourceEndDate) { fetchGrandTotal(sourceUserId.value, sourceStartDate.value, it) }
+    fun updateExpense(expense: Expense, imageUri: Uri?, contentResolver: ContentResolver) = viewModelScope.launch {
+        _saveExpenseStatus.value = FirebaseResult.Loading // Can reuse status LiveData
+        val result = expenseRepository.update(expense, imageUri, contentResolver)
+        _saveExpenseStatus.value = if(result is FirebaseResult.Success) FirebaseResult.Success("Updated") else result as FirebaseResult<String>
+    }
+
+    fun deleteExpense(expense: Expense) = viewModelScope.launch {
+        // Optionally have a delete status LiveData
+        expenseRepository.delete(expense)
+    }
+
+    fun clearSaveExpenseStatus() {
+        _saveExpenseStatus.value = null // Reset to null after being handled
     }
 
     private fun setDefaultDates() {
@@ -102,47 +204,10 @@ class ExpenseViewModel(application: Application) : AndroidViewModel(application)
         _startDateMillis.value = calendar.timeInMillis
     }
 
-    // Helper to fetch totals, called by MediatorLiveData observers
-    private var currentTotalsSource: LiveData<List<CategoryTotal>>? = null
-    private fun fetchCategoryTotals(userId: String?, startDate: Long?, endDate: Long?) {
-        // Remove previous source to avoid duplicates if fetching rapidly
-        currentTotalsSource?.let { categoryTotals.removeSource(it) }
-
-        if (userId != null && startDate != null && endDate != null) {
-            // Input is valid, fetch data using the CORRECT repository method
-            val newSource: LiveData<List<CategoryTotal>> =
-                expenseRepository.getCategoryTotalsForUserAndDateRange(userId, startDate, endDate) // <-- CORRECT METHOD
-
-            currentTotalsSource = newSource // Keep track of the current source
-
-            // Add the new source to the MediatorLiveData
-            categoryTotals.addSource(newSource) { totals ->
-                // When the new source emits data (List<CategoryTotal>), update the MediatorLiveData
-                categoryTotals.value = totals
-            }
-            Log.d("ExpenseViewModel", "Fetching category totals for $userId from $startDate to $endDate")
-        } else {
-            // Invalid input (user logged out, dates not set), post empty list
-            categoryTotals.value = emptyList()
-            Log.d("ExpenseViewModel", "Not fetching category totals - invalid input: User=$userId, Start=$startDate, End=$endDate")
-        }
-    }
-
-    private var currentGrandTotalSource: LiveData<Double?>? = null
-    private fun fetchGrandTotal(userId: String?, startDate: Long?, endDate: Long?) {
-        currentGrandTotalSource?.let { grandTotal.removeSource(it) }
-
-        if (userId != null && startDate != null && endDate != null) {
-            val newSource = expenseRepository.getExpensesTotalForUserAndDateRange(userId, startDate, endDate)
-            currentGrandTotalSource = newSource
-            grandTotal.addSource(newSource) { total ->
-                grandTotal.value = total // Post the result (could be null)
-            }
-            Log.d("ExpenseViewModel", "Fetching grand total for $userId from $startDate to $endDate")
-        } else {
-            grandTotal.value = null // Post null if input invalid
-            Log.d("ExpenseViewModel", "Not fetching grand total - invalid input.")
-        }
+    // getExpenseById will now call expenseRepository.getExpenseById which is suspend
+    suspend fun getExpenseById(id: String): Expense? {
+        val result = expenseRepository.getExpenseById(id)
+        return if (result is FirebaseResult.Success) result.data else null
     }
 
     // --- Public functions to update dates ---
@@ -163,70 +228,6 @@ class ExpenseViewModel(application: Application) : AndroidViewModel(application)
         } else {
             Log.w("ExpenseViewModel", "Attempted to set end date before start date.")
             // Optionally show error
-        }
-    }
-
-
-    // --- Expense Actions ---
-    fun insert(expense: Expense) = viewModelScope.launch {
-        if (expense.userId == _currentUserId.value) {
-            expenseRepository.insert(expense)
-        } else {
-            Log.e("ExpenseViewModel", "Attempted to insert expense with mismatched userId.")
-            // Handle error appropriately
-        }
-    }
-
-    fun update(expense: Expense) = viewModelScope.launch {
-        if (expense.userId == _currentUserId.value) {
-            expenseRepository.update(expense)
-        } else {
-            Log.e("ExpenseViewModel", "Attempted to update expense with mismatched userId.")
-        }
-    }
-
-    fun delete(expense: Expense) = viewModelScope.launch {
-        if (expense.userId == _currentUserId.value) {
-            expenseRepository.delete(expense)
-        } else {
-            Log.e("ExpenseViewModel", "Attempted to delete expense with mismatched userId.")
-        }
-    }
-
-    // Consider fetching ExpenseWithCategory if you need associated data before deleting by ID
-    fun deleteExpenseById(id: Long) = viewModelScope.launch {
-        val expenseToDelete = expenseRepository.getExpenseById(id)
-        if (expenseToDelete != null && expenseToDelete.userId == _currentUserId.value) {
-            expenseRepository.delete(expenseToDelete) // Use the object to be safe
-        } else {
-            Log.e("ExpenseViewModel", "Attempted to delete expense by ID, but it wasn't found or didn't belong to the user.")
-        }
-    }
-
-    suspend fun getExpenseById(id: Long): Expense? {
-        val expense = expenseRepository.getExpenseById(id)
-        return if (expense?.userId == _currentUserId.value) {
-            expense
-        } else {
-            null // Don't return expense if it doesn't belong to the user
-        }
-    }
-
-    // --- Helper to fetch Filtered Expenses List ---
-    private var currentFilteredListSource: LiveData<List<ExpenseWithCategory>>? = null
-    private fun fetchFilteredExpensesList(userId: String?, startDate: Long?, endDate: Long?) {
-        currentFilteredListSource?.let { filteredExpensesWithCategory.removeSource(it) }
-
-        if (userId != null && startDate != null && endDate != null) {
-            val newSource = expenseRepository.getFilteredExpensesWithCategoryForUser(userId, startDate, endDate)
-            currentFilteredListSource = newSource
-            filteredExpensesWithCategory.addSource(newSource) { expenses ->
-                filteredExpensesWithCategory.value = expenses // Post the filtered list
-            }
-            Log.d("ExpenseViewModel", "Fetching filtered expenses for $userId from $startDate to $endDate")
-        } else {
-            filteredExpensesWithCategory.value = emptyList() // Post empty list if input invalid
-            Log.d("ExpenseViewModel", "Not fetching filtered expenses - invalid input.")
         }
     }
 

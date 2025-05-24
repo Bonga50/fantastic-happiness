@@ -4,11 +4,18 @@
     <string name="menu_home">Home</string>
     <string name="menu_categories">Categories</string>
     <string name="menu_expenses">Expenses</string>
+    <string name="menu_help">Help</string>
     <string name="menu_logout">Logout</string>
 
     <string name="title_home">Home Fragment</string>
     <string name="title_categories">Categories Fragment</string>
     <string name="title_expenses">Expenses Fragment</string>
+    <string name="save_expense_button_text">Save</string>
+    <string name="update_expense_button_text">Update</string>
+    <string name="YOUR_SUPABASE_URL">https://xfbqyvvbzegyosjqqzpb.supabase.co</string>
+    <string name="YOUR_SUPABASE_ANON_KEY">eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhmYnF5dnZiemVneW9zanFxenBiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc0OTg0NDMsImV4cCI6MjA2MzA3NDQ0M30.OVTHtP3yD4mAoYRxnpCdU7PN7gjHrflf1vCO0X3V3rI</string>
+
+
     <!-- TODO: Remove or change this placeholder text -->
     <string name="hello_blank_fragment">Hello blank fragment</string>
 </resources>

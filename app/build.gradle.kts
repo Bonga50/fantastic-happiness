@@ -6,6 +6,7 @@ plugins {
     id ("kotlin-kapt")
     id("com.google.devtools.ksp")
     id("androidx.navigation.safeargs.kotlin")
+    id("org.jetbrains.kotlin.plugin.serialization")
 }
 
 android {
@@ -62,6 +63,10 @@ dependencies {
     implementation(libs.material)
     implementation(libs.androidx.activity)
     implementation(libs.androidx.constraintlayout)
+    implementation(libs.storage.kt)
+    implementation(libs.ktor.client.cio)
+    implementation(libs.kotlin.serialization)
+    implementation(libs.mpandroidchart)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -87,4 +92,16 @@ dependencies {
     implementation( libs.androidx.navigation.fragment)
     implementation (libs.androidx.navigation.ui)
     implementation(libs.glide)
+
+    // Firebase
+    implementation(platform("com.google.firebase:firebase-bom:33.0.0")) // Check for latest BOM
+    implementation("com.google.firebase:firebase-auth-ktx")
+    implementation("com.google.firebase:firebase-database-ktx") // Realtime Database
+
+    // Supabase
+
+    implementation("io.ktor:ktor-client-android:3.1.1")
+
+    //Charts
+    implementation("com.github.PhilJay:MPAndroidchart:v3.1.0")
 }

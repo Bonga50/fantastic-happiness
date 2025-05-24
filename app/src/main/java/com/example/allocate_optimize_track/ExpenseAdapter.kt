@@ -22,71 +22,58 @@ class ExpenseAdapter(
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ExpenseViewHolder {
         val view = LayoutInflater.from(parent.context)
             .inflate(R.layout.item_expense, parent, false)
-        // Pass both listeners to ViewHolder
         return ExpenseViewHolder(view, onItemClicked, onItemLongClicked)
     }
 
-
     override fun onBindViewHolder(holder: ExpenseViewHolder, position: Int) {
-        val current = getItem(position)
-        holder.bind(current)
+        holder.bind(getItem(position))
     }
 
     class ExpenseViewHolder(
         itemView: View,
         private val onItemClicked: (ExpenseWithCategory) -> Unit,
-        private val onItemLongClicked: (ExpenseWithCategory) -> Unit // Add listener param
+        private val onItemLongClicked: (ExpenseWithCategory) -> Unit
     ) : RecyclerView.ViewHolder(itemView) {
-
         private val descriptionTextView: TextView = itemView.findViewById(R.id.textViewExpenseDescription)
         private val categoryTextView: TextView = itemView.findViewById(R.id.textViewExpenseCategory)
         private val amountTextView: TextView = itemView.findViewById(R.id.textViewExpenseAmount)
         private val dateTextView: TextView = itemView.findViewById(R.id.textViewExpenseDate)
-        private val receiptImageView: ImageView = itemView.findViewById(R.id.imageViewSmallReceipt) // Add to layout
-        private var currentExpenseItem: ExpenseWithCategory? = null
+        private val receiptImageView: ImageView = itemView.findViewById(R.id.imageViewSmallReceipt)
+        private var currentExpenseItemData: ExpenseWithCategory? = null
 
         init {
-            itemView.setOnClickListener {
-                currentExpenseItem?.let { item -> onItemClicked(item) }
-            }
-            // Add long click listener
+            itemView.setOnClickListener { currentExpenseItemData?.let { onItemClicked(it) } }
             itemView.setOnLongClickListener {
-                currentExpenseItem?.let { item ->
-                    onItemLongClicked(item) // Trigger the callback
-                    return@setOnLongClickListener true // Consume the event
-                }
-                false // Don't consume if item is null
+                currentExpenseItemData?.let { onItemLongClicked(it) }
+                true
             }
         }
 
-
         fun bind(expenseItem: ExpenseWithCategory) {
-            currentExpenseItem = expenseItem
+            currentExpenseItemData = expenseItem
             val expense = expenseItem.expense
             val context = itemView.context
 
             descriptionTextView.text = expense.description
-            categoryTextView.text = expenseItem.categoryName // Use the joined name
+            categoryTextView.text = expenseItem.categoryName // From client-side combination
 
-            // Format currency
             val currencyFormat = NumberFormat.getCurrencyInstance(Locale.getDefault())
             amountTextView.text = currencyFormat.format(expense.amount)
 
-            // Format date
-            val dateFormat = DateFormat.getMediumDateFormat(context) // Or getDateFormat
+            val dateFormat = DateFormat.getMediumDateFormat(context)
             dateTextView.text = dateFormat.format(Date(expense.date))
 
-            // Load receipt image thumbnail if URI exists
-            if (!expense.photoUri.isNullOrEmpty()) {
+            if (!expense.photoStoragePath.isNullOrEmpty()) {
                 receiptImageView.visibility = View.VISIBLE
+                val imageUrl = SupabaseImageService.getImageUrl(expense.photoStoragePath!!) // Get URL from service
                 Glide.with(context)
-                    .load(Uri.parse(expense.photoUri))
+                    .load(imageUrl)
                     .centerCrop()
-                    .placeholder(R.drawable.ic_image_placeholder)
-                    .error(R.drawable.ic_image_error)
+                    .placeholder(R.drawable.ic_image_placeholder) // Your placeholder
+                    .error(R.drawable.ic_image_error)         // Your error drawable
                     .into(receiptImageView)
             } else {
-                receiptImageView.visibility = View.GONE // Hide if no image
+                receiptImageView.visibility = View.GONE
             }
         }
     }
@@ -95,7 +82,6 @@ class ExpenseAdapter(
         override fun areItemsTheSame(oldItem: ExpenseWithCategory, newItem: ExpenseWithCategory): Boolean {
             return oldItem.expense.id == newItem.expense.id
         }
-
         override fun areContentsTheSame(oldItem: ExpenseWithCategory, newItem: ExpenseWithCategory): Boolean {
             return oldItem == newItem
         }

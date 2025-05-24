@@ -76,22 +76,33 @@ class CategoriesFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        // Observe the list of Categories
-        categoryViewModel.allCategories.observe(viewLifecycleOwner, Observer { categories ->
-            Log.d("CategoriesFragment", "Categories list updated: ${categories?.size}")
-            // Submit the category list. The totals will be applied during binding
-            // using the map populated by the other observer.
+        // Observe list of categories from Firebase
+        categoryViewModel.allCategories.observe(viewLifecycleOwner) { categories ->
+            Log.d("CategoriesFragment", "Categories list updated: ${categories?.size ?: 0}")
             categoryAdapter.submitList(categories ?: emptyList())
-        })
+            // Totals will be applied by the other observer via adapter.setCategorySpending
+        }
 
-        // Observe the Category Totals for the selected date range
-        expenseViewModel.categoryTotals.observe(viewLifecycleOwner, Observer { totals ->
-            Log.d("CategoriesFragment", "Category totals updated: ${totals?.size}")
-            val totalsMap = totals?.associateBy({ it.categoryId }, { it.totalAmount }) ?: emptyMap()
-            // Update the adapter's internal map
-            categoryAdapter.updateTotalsMap(totalsMap)
-            // Note: updateTotalsMap now calls notifyDataSetChanged in the adapter
-        })
+        // Observe category totals for the selected date range (calculated client-side in ExpenseViewModel)
+        expenseViewModel.categoryTotals.observe(viewLifecycleOwner) { categoryTotalList ->
+            Log.d("CategoriesFragment", "Category totals updated: ${categoryTotalList?.size ?: 0}")
+            val spendingMap = categoryTotalList?.associate { it.categoryId to it.totalAmount } ?: emptyMap()
+            categoryAdapter.setCategorySpending(spendingMap)
+        }
+
+        // Observe operation status (add, update, delete)
+        categoryViewModel.operationStatus.observe(viewLifecycleOwner) { result ->
+            when (result) {
+                is FirebaseResult.Loading -> { /* Show loading indicator */ }
+                is FirebaseResult.Success -> {
+                    Toast.makeText(context, "Operation successful", Toast.LENGTH_SHORT).show()
+                }
+                is FirebaseResult.Failure -> {
+                    Toast.makeText(context, "Operation failed: ${result.exception.message}", Toast.LENGTH_LONG).show()
+                    Log.e("CategoriesFragment", "Firebase op failed", result.exception)
+                }
+            }
+        }
 
         // Observe date changes to update the display TextView
         expenseViewModel.startDateMillis.observe(viewLifecycleOwner) { updateDateRangeDisplay() }
@@ -151,69 +162,62 @@ class CategoriesFragment : Fragment() {
     }
 
     private fun showAddEditCategoryDialog(categoryToEdit: Category?) {
-        val dialogView = LayoutInflater.from(requireContext())
-            .inflate(R.layout.dialog_add_edit_category, null)
+        val dialogView = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_add_edit_category, null)
         val nameEditText = dialogView.findViewById<TextInputEditText>(R.id.editTextCategoryName)
         val descEditText = dialogView.findViewById<TextInputEditText>(R.id.editTextCategoryDesc)
         val limitEditText = dialogView.findViewById<TextInputEditText>(R.id.editTextCategoryLimit)
-        val gaolEditText = dialogView.findViewById<TextInputEditText>(R.id.editCategoryGoal)
+        val goalEditText = dialogView.findViewById<TextInputEditText>(R.id.editCategoryGoal) // Add to your dialog layout
+
         val dialogTitle = if (categoryToEdit == null) "Add Category" else "Edit Category"
 
-        // Pre-fill fields if editing
         categoryToEdit?.let {
             nameEditText.setText(it.name)
             descEditText.setText(it.description)
             limitEditText.setText(it.monthlyLimit?.toString() ?: "")
+            goalEditText.setText(it.monthlyGoal?.toString() ?: "") // Pre-fill goal
         }
 
         MaterialAlertDialogBuilder(requireContext())
             .setTitle(dialogTitle)
             .setView(dialogView)
-            .setNegativeButton("Cancel", null) // Dismisses the dialog
-            .setPositiveButton("Save", null) // Override listener below
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton(if (categoryToEdit == null) "Add" else "Update", null) // Set null to override
             .show()
-            .apply { // Get the dialog instance to override the button listener
-                // Override the positive button click listener for validation
+            .apply {
                 getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                     val name = nameEditText.text.toString().trim()
                     val description = descEditText.text.toString().trim()
                     val limitString = limitEditText.text.toString().trim()
-                    val limit = limitString.toDoubleOrNull() // Safely convert to Double
-                    val goalString = gaolEditText.text.toString().trim()
+                    val limit = limitString.toDoubleOrNull()
+                    val goalString = goalEditText.text.toString().trim() // Get goal
                     val goal = goalString.toDoubleOrNull()
 
                     if (name.isEmpty()) {
-                        nameEditText.error = "Name cannot be empty"
-                        return@setOnClickListener // Prevent closing dialog
-                    } else {
-                        nameEditText.error = null // Clear error
+                        nameEditText.error = "Name cannot be empty"; return@setOnClickListener
                     }
-                    auth = Firebase.auth
-                    // Create or update the category object
-                    val category = auth.currentUser?.email?.let { it1 ->
-                        Category(
-                            id = categoryToEdit?.id ?: 0, // Use existing ID if editing, 0 for Room to generate
-                            createdAt = categoryToEdit?.createdAt ?: System.currentTimeMillis(), // Keep original creation time if editing
-                            name = name,
-                            userId = it1,
-                            description = description.ifEmpty { null }, // Store null if empty
-                            monthlyLimit = limit,
-                            monthlyGoal = goal
-                        )
+                    // Get current user ID (this should be robustly available, e.g., from ViewModel)
+                    val currentFbUserId = categoryViewModel.getCurrentUserId() // Ensure this method exists in ViewModel
+                    if (currentFbUserId == null) {
+                        Toast.makeText(context, "Error: Not logged in", Toast.LENGTH_SHORT).show()
+                        return@setOnClickListener
                     }
 
+                    val category = Category(
+                        id = categoryToEdit?.id ?: "", // Keep existing ID for update, empty for new (Firebase service will gen)
+                        createdAt = categoryToEdit?.createdAt ?: System.currentTimeMillis(),
+                        name = name,
+                        userId = currentFbUserId, // Set Firebase UID
+                        description = description.ifEmpty { null },
+                        monthlyLimit = limit,
+                        monthlyGoal = goal
+                    )
+
                     if (categoryToEdit == null) {
-                        if (category != null) {
-                            categoryViewModel.insert(category)
-                        }
-                        Toast.makeText(requireContext(), "Category Added", Toast.LENGTH_SHORT).show()
+                        categoryViewModel.insert(category)
                     } else {
-                        if (category != null) {
-                            categoryViewModel.update(category)
-                        }
-                        Toast.makeText(requireContext(), "Category Updated", Toast.LENGTH_SHORT).show()
+                        categoryViewModel.update(category)
                     }
-                    dismiss() // Close the dialog only if successful
+                    dismiss()
                 }
             }
     }
@@ -222,11 +226,10 @@ class CategoriesFragment : Fragment() {
     private fun showDeleteConfirmationDialog(category: Category) {
         MaterialAlertDialogBuilder(requireContext())
             .setTitle("Delete Category")
-            .setMessage("Are you sure you want to delete '${category.name}'?")
+            .setMessage("Are you sure you want to delete '${category.name}'? This will also delete its expenses.") // Update message
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Delete") { _, _ ->
-                categoryViewModel.delete(category) // Or use deleteById(category.id)
-                Toast.makeText(requireContext(), "'${category.name}' Deleted", Toast.LENGTH_SHORT).show()
+                categoryViewModel.delete(category) // ViewModel will call repository's Firebase delete
             }
             .show()
     }

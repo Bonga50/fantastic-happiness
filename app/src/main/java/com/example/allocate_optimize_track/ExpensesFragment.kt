@@ -70,21 +70,23 @@ class ExpensesFragment : Fragment() {
         //       For now, we display all expenses and the totals separately reflect the selected range.
 
         // --- Observe the NEW Filtered Expenses List ---
-        expenseViewModel.filteredExpensesWithCategory.observe(viewLifecycleOwner, Observer { expenses ->
-            // This list is now filtered by the selected date range
+        // Observe the client-side filtered list of expenses
+        expenseViewModel.filteredExpensesWithCategory.observe(viewLifecycleOwner) { expenses ->
             Log.d("ExpensesFragment", "Filtered expenses updated: ${expenses?.size ?: 0}")
-            textViewListTitle.text = "Expenses (${expenses?.size ?: 0})" // Update title with count
-            expenseAdapter.submitList(expenses) // Submit the filtered list
-        })
+            textViewListTitle.text = "Expenses (${expenses?.size ?: 0})"
+            expenseAdapter.submitList(expenses)
+        }
 
-        // Observe date changes to update the display TextView (remains the same)
+
+        // Observe date changes to update UI
         expenseViewModel.startDateMillis.observe(viewLifecycleOwner) { updateDateRangeDisplay() }
         expenseViewModel.endDateMillis.observe(viewLifecycleOwner) { updateDateRangeDisplay() }
 
         // Observe Grand Total (remains the same)
-        expenseViewModel.grandTotal.observe(viewLifecycleOwner, Observer { total ->
+        expenseViewModel.grandTotal.observe(viewLifecycleOwner) { total ->
             updateGrandTotalDisplay(total)
-        })
+        }
+
     }
 
     private fun updateGrandTotalDisplay(total: Double?) {
@@ -103,31 +105,29 @@ class ExpensesFragment : Fragment() {
 
 
     private fun setupRecyclerView() {
-        // Pass both lambdas to the adapter
         expenseAdapter = ExpenseAdapter(
             onItemClicked = { expenseWithCategory ->
                 // Navigate to AddEditExpenseFragment with the expense ID
-                Log.d("ExpensesFragment", "Editing expense ID: ${expenseWithCategory.expense.id}")
                 val action = ExpensesFragmentDirections
-                    .actionExpensesFragmentToAddEditExpenseFragment(expenseWithCategory.expense.id) // Use Safe Args generated action
+                    .actionExpensesFragmentToAddEditExpenseFragment(expenseWithCategory.expense.id) // Firebase ID
                 findNavController().navigate(action)
             },
             onItemLongClicked = { expenseWithCategory ->
-                // Show delete confirmation dialog
-                showDeleteConfirmationDialog(expenseWithCategory.expense) // Pass the Expense object
+                showDeleteConfirmationDialog(expenseWithCategory.expense) // Pass Firebase Expense model
             }
         )
         recyclerView.adapter = expenseAdapter
         recyclerView.layoutManager = LinearLayoutManager(requireContext())
     }
 
-    private fun showDeleteConfirmationDialog(expense: Expense) {
+    private fun showDeleteConfirmationDialog(expense: Expense) { // Takes Firebase Expense
         MaterialAlertDialogBuilder(requireContext())
             .setTitle("Delete Expense")
             .setMessage("Are you sure you want to delete this expense?\n\"${expense.description}\"")
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Delete") { _, _ ->
-                expenseViewModel.delete(expense) // Call ViewModel delete function
+                expenseViewModel.deleteExpense(expense) // Call ViewModel Firebase delete
+                // Optionally observe a delete status LiveData for feedback
                 Toast.makeText(context, "Expense deleted", Toast.LENGTH_SHORT).show()
             }
             .show()

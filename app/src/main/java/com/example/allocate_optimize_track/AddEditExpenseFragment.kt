@@ -4,6 +4,8 @@ import android.Manifest
 import android.app.Activity.RESULT_OK
 import android.app.DatePickerDialog
 import android.content.ActivityNotFoundException
+import android.content.ContentResolver
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -23,6 +25,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.widget.addTextChangedListener
 import androidx.fragment.app.Fragment
+import androidx.fragment.app.activityViewModels
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.Observer
 import androidx.lifecycle.lifecycleScope
@@ -53,14 +56,10 @@ private const val ARG_PARAM2 = "param2"
  */
 class AddEditExpenseFragment : Fragment() {
     // Use the same ViewModel instance as the list fragment if needed, or a new one
-    private val expenseViewModel: ExpenseViewModel by viewModels() // Or activityViewModels()
-    // Use Safe Args delegate to get arguments
+    private val expenseViewModel: ExpenseViewModel by activityViewModels()
     private val args: AddEditExpenseFragmentArgs by navArgs()
-    // View Binding (optional but recommended)
-    // private var _binding: FragmentAddEditExpenseBinding? = null
-    // private val binding get() = _binding!!
-
-    // Views (example without View Binding)
+    private val gamificationViewModel: GamificationViewModel by viewModels()
+    // Views
     private lateinit var amountEditText: TextInputEditText
     private lateinit var dateButton: MaterialButton
     private lateinit var dateTextView: TextView
@@ -71,6 +70,11 @@ class AddEditExpenseFragment : Fragment() {
     private lateinit var attachPhotoButton: MaterialButton
     private lateinit var saveButton: MaterialButton
 
+    private lateinit var buttonLastUsedCategory: MaterialButton
+    private val PREFS_NAME = "expense_app_prefs"
+    private val LAST_USED_CATEGORY_ID_KEY = "last_used_category_id"
+    private val LAST_USED_CATEGORY_NAME_KEY = "last_used_category_name"
+
 
 
     // Activity Result Launchers
@@ -79,34 +83,32 @@ class AddEditExpenseFragment : Fragment() {
     private lateinit var takePictureLauncher: ActivityResultLauncher<Uri>
     private lateinit var selectImageLauncher: ActivityResultLauncher<String>
 
-    private var selectedDateMillis: Long = System.currentTimeMillis() // Default to now
+    // State variables
+    private var selectedDateMillis: Long = System.currentTimeMillis()
     private var selectedCategory: Category? = null
-    private var currentPhotoUri: Uri? = null
-    private var tempCameraPhotoUri: Uri? = null // URI provided to camera app
-    private var existingExpense: Expense? = null // Store fetched expense for editing
+    private var currentPhotoUri: Uri? = null // Uri of a NEWLY selected photo by the user
+    private var tempCameraPhotoUri: Uri? = null
+    private var existingExpense: Expense? = null
     private var isEditing: Boolean = false
 
-    private lateinit var categoryAdapter: ArrayAdapter<String>
+    // Category Dropdown
+    private lateinit var categoryAdapterSpinner: ArrayAdapter<String>
     private var categoryList: List<Category> = emptyList()
-    private val categoryNameMap = mutableMapOf<String, Long>() // Map display name to ID
+    private val categoryNameMap = mutableMapOf<String, String>() // Map display name to ID
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setupActivityResultLaunchers()
-        isEditing = args.expenseId != -1L
+        // Check if editing based on passed argument ID. Firebase IDs are not -1L.
+        isEditing = !args.expenseId.isNullOrBlank()
     }
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View? {
-        // Inflate the layout
         val view = inflater.inflate(R.layout.fragment_add_edit_expense, container, false)
-        // If using View Binding:
-        // _binding = FragmentAddEditExpenseBinding.inflate(inflater, container, false)
-        // return binding.root
 
-        // Find views (example without View Binding)
         amountEditText = view.findViewById(R.id.editTextExpenseAmount)
         dateButton = view.findViewById(R.id.buttonSelectDate)
         dateTextView = view.findViewById(R.id.textViewSelectedDate)
@@ -116,35 +118,71 @@ class AddEditExpenseFragment : Fragment() {
         photoPreviewImageView = view.findViewById(R.id.imageViewReceiptPreview)
         attachPhotoButton = view.findViewById(R.id.buttonAttachPhoto)
         saveButton = view.findViewById(R.id.buttonSaveExpense)
-
+        buttonLastUsedCategory = view.findViewById(R.id.buttonLastUsedCategory)
         return view
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        Log.d("AddEditExpense", "onViewCreated started") // Add log
-        setupCategoryDropdown()
-        setupDateSelection() // <--- Make sure this is called
+        Log.d("AddEditExpense", "onViewCreated. isEditing: $isEditing, expenseId: ${args.expenseId}")
+
+        setupCategoryDropdown() // Must be called before observeCategories if populating from existing
+        setupDateSelection()
         setupPhotoAttachment()
         setupSaveButton()
-        updateDateDisplay()
-        observeCategories()
-
-        Log.d("AddEditExpense", "onViewCreated finished setup") // Add log
+        observeCategoriesForDropdown() // Start observing categories for the dropdown
+        loadAndDisplayLastUsedCategoryButton()
+        setupLastUsedCategoryButtonClickListener()
 
         if (isEditing) {
-            Log.d("AddEditExpense", "Editing mode. Expense ID: ${args.expenseId}")
-            // Change UI elements for editing mode
-            // (e.g., binding.buttonSaveExpense.text = "Update Expense", findNavController().currentDestination?.label = "Edit Expense")
-            saveButton.text = "Update Expense" // Example
-
-            // Fetch the existing expense data
-            fetchAndPopulateExpenseData()
+            saveButton.text = getString(R.string.update_expense_button_text) // Use string resource
+            // Fetch and populate existing expense data
+            viewLifecycleOwner.lifecycleScope.launch {
+                val fetchedExpense =
+                    args.expenseId?.let { expenseViewModel.getExpenseById(it) } // Suspend fun
+                if (fetchedExpense != null) {
+                    existingExpense = fetchedExpense
+                    populateFields(existingExpense!!)
+                } else {
+                    Toast.makeText(context, "Error: Could not load expense for editing.", Toast.LENGTH_LONG).show()
+                    Log.e("AddEditExpense", "Failed to fetch expense with ID: ${args.expenseId}")
+                    findNavController().navigateUp()
+                }
+            }
         } else {
-            Log.d("AddEditExpense", "Adding new expense.")
-            // Set default date display for new expense
-            updateDateDisplay()
-            saveButton.text = "Save Expense" // Example
+            saveButton.text = getString(R.string.save_expense_button_text) // Use string resource
+            updateDateDisplay() // Set initial date for new expense
+        }
+
+        expenseViewModel.saveExpenseStatus.observe(viewLifecycleOwner) { result ->
+            Log.d("AddEditExpense", "saveExpenseStatus observed: $result") // Log every emission
+            if (result == null) { // If it's null (cleared or initial), do nothing further
+                Log.d("AddEditExpense", "saveExpenseStatus is null, returning from observer.")
+                saveButton.isEnabled = true // Ensure button is enabled if status is cleared
+                return@observe
+            }
+
+            // Only process non-null results once
+            when (result) {
+                is FirebaseResult.Loading -> {
+                    saveButton.isEnabled = false
+                    Log.d("AddEditExpense", "Status: Loading...")
+                }
+                is FirebaseResult.Success -> {
+                    saveButton.isEnabled = true // Re-enable button
+                    Toast.makeText(context, if (isEditing) "Expense Updated" else "Expense Saved", Toast.LENGTH_SHORT).show()
+                    Log.d("AddEditExpense", "Status: Success. Navigating up.")
+                    findNavController().navigateUp()
+                    gamificationViewModel.recordUserActivity()
+                    expenseViewModel.clearSaveExpenseStatus() // Clear after handling
+                }
+                is FirebaseResult.Failure -> {
+                    saveButton.isEnabled = true // Re-enable button
+                    Toast.makeText(context, "Operation Failed: ${result.exception.message}", Toast.LENGTH_LONG).show()
+                    Log.e("AddEditExpense", "Status: Failure", result.exception)
+                    expenseViewModel.clearSaveExpenseStatus() // Clear after handling
+                }
+            }
         }
     }
 
@@ -152,99 +190,91 @@ class AddEditExpenseFragment : Fragment() {
 
     private fun setupActivityResultLaunchers() {
         // Camera Permission
-        requestCameraPermissionLauncher = registerForActivityResult(
-            ActivityResultContracts.RequestPermission()
-        ) { isGranted: Boolean ->
-            if (isGranted) {
-                launchCamera()
-            } else {
-                Toast.makeText(requireContext(), "Camera permission denied", Toast.LENGTH_SHORT).show()
-            }
+        requestCameraPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+            if (isGranted) launchCamera()
+            else Toast.makeText(requireContext(), "Camera permission denied.", Toast.LENGTH_SHORT).show()
         }
-
         // Gallery Permission
-        requestGalleryPermissionLauncher = registerForActivityResult(
-            ActivityResultContracts.RequestPermission()
-        ) { isGranted: Boolean ->
-            if (isGranted) {
-                selectImageLauncher.launch("image/*")
-            } else {
-                Toast.makeText(requireContext(), "Storage permission denied", Toast.LENGTH_SHORT).show()
-            }
+        requestGalleryPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+            if (isGranted) launchGallery()
+            else Toast.makeText(requireContext(), "Gallery permission denied.", Toast.LENGTH_SHORT).show()
         }
-
         // Take Picture
-        takePictureLauncher = registerForActivityResult(
-            ActivityResultContracts.TakePicture()
-        ) { success: Boolean ->
+        takePictureLauncher = registerForActivityResult(ActivityResultContracts.TakePicture()) { success ->
             if (success) {
-                currentPhotoUri = tempCameraPhotoUri // The URI we passed to the camera
+                currentPhotoUri = tempCameraPhotoUri // This is the Uri passed to camera app
                 loadPhotoPreview(currentPhotoUri)
-            } else {
-                // Handle failure or cancellation
-                Log.e("AddEditExpense", "Camera capture failed or cancelled")
-                // Optionally delete the temporary file if created
-            }
-            tempCameraPhotoUri = null // Reset temp uri
+            } else { Log.e("AddEditExpense", "Camera capture failed/cancelled.") }
+            tempCameraPhotoUri = null // Reset
         }
-
         // Select Image from Gallery
-        selectImageLauncher = registerForActivityResult(
-            ActivityResultContracts.GetContent() // Or ActivityResultContracts.PickVisualMedia() for modern picker
-        ) { uri: Uri? ->
+        selectImageLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
             uri?.let {
-                // Persist permission for gallery URI if needed across restarts
-                try {
-                    //requireContext().contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    currentPhotoUri = it
-                    loadPhotoPreview(currentPhotoUri)
-                } catch (e: SecurityException) {
-                    Log.e("AddEditExpense", "Failed to persist URI permission", e)
-                    Toast.makeText(requireContext(), "Could not load image", Toast.LENGTH_SHORT).show()
-                }
+                currentPhotoUri = it
+                loadPhotoPreview(currentPhotoUri)
             }
         }
     }
 
 
     private fun setupCategoryDropdown() {
-        categoryAdapter = ArrayAdapter(requireContext(), R.layout.list_item_dropdown, mutableListOf<String>()) // Use a simple list item layout
-        categoryAutoComplete.setAdapter(categoryAdapter)
-
-        categoryAutoComplete.setOnItemClickListener { parent, _, position, _ ->
-            val selectedName = parent.getItemAtPosition(position) as String
-            val selectedId = categoryNameMap[selectedName]
-            selectedCategory = categoryList.find { it.id == selectedId }
-            // Clear error if category is selected
-            categoryLayout.error = null
-            Log.d("AddEditExpense", "Selected category: ${selectedCategory?.name} (ID: ${selectedCategory?.id})")
+        categoryAdapterSpinner = ArrayAdapter(requireContext(), R.layout.list_item_dropdown, mutableListOf<String>())
+        categoryAutoComplete.setAdapter(categoryAdapterSpinner)
+        categoryAutoComplete.setOnItemClickListener { _, _, position, _ ->
+            val selectedName = categoryAdapterSpinner.getItem(position)
+            val categoryId = categoryNameMap[selectedName] // Get ID from map
+            selectedCategory = categoryList.find { it.id == categoryId }
+            categoryLayout.error = null // Clear error on selection
+            Log.d("AddEditExpense", "Category selected: ${selectedCategory?.name}, ID: ${selectedCategory?.id}")
         }
-        // Clear selection if text is manually cleared (optional)
+        // Optional: Clear selection if text is manually cleared
         categoryAutoComplete.addTextChangedListener { text ->
             if (text.isNullOrEmpty() || !categoryNameMap.containsKey(text.toString())) {
+                if (selectedCategory != null) { // Only log if it was previously selected
+                    Log.d("AddEditExpense", "Category selection cleared or invalid input.")
+                }
                 selectedCategory = null
             }
         }
     }
 
-    private fun observeCategories() {
-        Log.d("AddEditExpense", "Setting up categories observer")
-        expenseViewModel.userCategories.observe(viewLifecycleOwner, Observer { categories ->
-            Log.d("AddEditExpense", "Categories Observer received data. Count: ${categories?.size}")
-            val previousCategoryListEmpty = categoryList.isEmpty() // Check if list was previously empty
+    private fun observeCategoriesForDropdown() {
+        Log.d("AddEditExpense", "Observing user categories for dropdown.")
+        expenseViewModel.userCategories.observe(viewLifecycleOwner) { categories ->
+            Log.d("AddEditExpense", "Received categories for dropdown: ${categories?.size ?: 0}")
+            val wasCategoryListEmpty = categoryList.isEmpty() // Check before updating
             categoryList = categories ?: emptyList()
             categoryNameMap.clear()
-            val categoryNames = categories?.map { categoryNameMap[it.name] = it.id; it.name } ?: emptyList()
-
-            categoryAdapter.clear()
-            categoryAdapter.addAll(categoryNames)
-            // categoryAdapter.notifyDataSetChanged() // Usually not needed with addAll
-
-            // If editing and categories just loaded, try to select the category again
-            if (isEditing && previousCategoryListEmpty && categoryList.isNotEmpty()) {
-                existingExpense?.let { findAndSelectCategory(it.categoryId) }
+            val names = categoryList.map { category ->
+                categoryNameMap[category.name] = category.id // Map name to Firebase ID
+                category.name
             }
-        })
+            categoryAdapterSpinner.clear()
+            categoryAdapterSpinner.addAll(names)
+            // categoryAdapterSpinner.notifyDataSetChanged() // Not always needed with addAll
+
+            // If editing and categories just loaded, and we have an existing expense, try to select its category
+            if (isEditing && wasCategoryListEmpty && categoryList.isNotEmpty() && existingExpense != null) {
+                Log.d("AddEditExpense", "Attempting to pre-select category for existing expense.")
+                findAndSelectCategoryInDropdown(existingExpense!!.categoryId)
+            }
+        }
+    }
+
+    private fun findAndSelectCategoryInDropdown(categoryIdToSelect: String) {
+        Log.d("AddEditExpense", "Attempting to find and select category ID: $categoryIdToSelect")
+        val category = categoryList.find { it.id == categoryIdToSelect }
+        if (category != null) {
+            selectedCategory = category
+            // Set the text in the AutoCompleteTextView. This must be one of the strings
+            // that the adapter currently holds for the dropdown to show it.
+            categoryAutoComplete.setText(category.name, false) // false = don't filter
+            categoryLayout.error = null
+            Log.d("AddEditExpense", "Successfully pre-selected category: ${category.name}")
+        } else {
+            Log.w("AddEditExpense", "Could not find category ID '$categoryIdToSelect' in current categoryList.")
+            if (isEditing) categoryLayout.error = "Original category not found"
+        }
     }
 
     private fun setupDateSelection() {
@@ -290,17 +320,19 @@ class AddEditExpenseFragment : Fragment() {
     }
 
     private fun showPhotoSourceDialog() {
-        val options = arrayOf( "Choose from Gallery", "Cancel")
+        val options = arrayOf("Take Photo", "Choose from Gallery", "Cancel") // Add "Take Photo" back
         AlertDialog.Builder(requireContext())
             .setTitle("Attach Receipt")
             .setItems(options) { dialog, which ->
                 when (which) {
-                    0 -> checkGalleryPermissionAndLaunch() // Take Photo
-                    1 -> dialog.dismiss() // Choose from Gallery
+                    0 -> checkCameraPermissionAndLaunch() // Take Photo
+                    1 -> checkGalleryPermissionAndLaunch() // Choose from Gallery
+                    2 -> dialog.dismiss() // Cancel
                 }
             }
             .show()
     }
+
 
 
     private fun checkCameraPermissionAndLaunch() {
@@ -453,17 +485,24 @@ class AddEditExpenseFragment : Fragment() {
         // You'd need to define pickMediaLauncher using ActivityResultContracts.PickVisualMedia()
     }
 
-    private fun loadPhotoPreview(uri: Uri?) {
+    private fun loadPhotoPreview(uri: Uri?) { // This loads the NEWLY selected local URI
         if (uri != null) {
+            Log.d("AddEditExpense", "Loading NEWLY selected photo preview from URI: $uri")
             Glide.with(this)
-                .load(uri)
+                .load(uri) // Local URI
                 .centerCrop()
-                .placeholder(R.drawable.ic_image_placeholder) // Add a placeholder drawable
-                .error(R.drawable.ic_image_error) // Add an error drawable
+                .placeholder(R.drawable.ic_image_placeholder)
+                .error(R.drawable.ic_image_error)
                 .into(photoPreviewImageView)
             photoPreviewImageView.visibility = View.VISIBLE
         } else {
-            photoPreviewImageView.visibility = View.GONE
+            // If uri is null, it means no NEW image is selected.
+            // If editing, the existing image (if any) would have been loaded in populateFields from Supabase URL.
+            // If adding and no image selected, keep it hidden.
+            if (!isEditing || existingExpense?.photoStoragePath.isNullOrEmpty()) {
+                photoPreviewImageView.visibility = View.GONE
+            }
+            Log.d("AddEditExpense", "No new photo URI to preview. isEditing: $isEditing")
         }
     }
 
@@ -476,144 +515,126 @@ class AddEditExpenseFragment : Fragment() {
     private fun saveExpense() {
         val amountString = amountEditText.text.toString()
         val description = descriptionEditText.text.toString().trim()
-
-        // --- Validation ---
         var isValid = true
+
         val amount = amountString.toDoubleOrNull()
         if (amount == null || amount <= 0) {
-            amountEditText.error = "Please enter a valid positive amount"
-            isValid = false
-        } else {
-            amountEditText.error = null
-        }
+            amountEditText.error = "Valid amount required"; isValid = false
+        } else amountEditText.error = null
 
         if (selectedCategory == null) {
-            categoryLayout.error = "Please select a category" // Set error on the layout
-            // categoryAutoComplete.error = "Please select a category" // Alternative
-            isValid = false
-        } else {
-            categoryLayout.error = null
-        }
+            categoryLayout.error = "Category required"; isValid = false
+        } else categoryLayout.error = null
 
         if (description.isEmpty()) {
-            descriptionEditText.error = "Description cannot be empty"
-            isValid = false
-        } else {
-            descriptionEditText.error = null
+            descriptionEditText.error = "Description required"; isValid = false
+        } else descriptionEditText.error = null
+
+        if (!isValid) {
+            Log.w("AddEditExpense", "Validation failed.")
+            return
         }
 
-        // Optional: Check if date was explicitly selected if required beyond default
-        // if (!dateWasSelected) { ... }
-
-        if (!isValid) return
-
-        val userId = Firebase.auth.currentUser?.email
-        if (userId == null) { /* ... handle error ... */ return }
-
-        // Create or Update the Expense object
-        val expenseData = amount?.let {
-            Expense(
-                id = if (isEditing) existingExpense!!.id else 0, // Use existing ID if editing
-                userId = userId,
-                categoryId = selectedCategory!!.id, // Safe due to validation
-                amount = it, // Safe due to validation
-                date = selectedDateMillis,
-                description = description, // Safe due to validation
-                photoUri = currentPhotoUri?.toString()
-            )
+        val currentFbUserId = Firebase.auth.currentUser?.uid
+        if (currentFbUserId == null) {
+            Toast.makeText(context, "Error: User not logged in.", Toast.LENGTH_LONG).show()
+            return
         }
 
-        // --- Call ViewModel ---
+        val expenseToSave = Expense(
+            id = if (isEditing) existingExpense!!.id else "", // ID is empty for new, service generates
+            userId = currentFbUserId,
+            categoryId = selectedCategory!!.id, // Firebase ID of category
+            amount = amount!!, // Safe due to validation
+            date = selectedDateMillis,
+            description = description,
+            // If editing AND no new image was picked (currentPhotoUri is null), keep existing path.
+            // Otherwise, new image (currentPhotoUri) will be uploaded, or path becomes null if no image.
+            photoStoragePath = if (isEditing && currentPhotoUri == null) existingExpense?.photoStoragePath else null
+        )
+
+        Log.d("AddEditExpense", "Attempting to save/update expense: $expenseToSave, newPhotoUri: $currentPhotoUri")
+        if (selectedCategory != null) {
+            val prefs = requireActivity().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+            prefs.putString(LAST_USED_CATEGORY_ID_KEY, selectedCategory!!.id)
+            prefs.putString(LAST_USED_CATEGORY_NAME_KEY, selectedCategory!!.name)
+            prefs.apply()
+            Log.d("AddEditExpense", "Saved last used category: ${selectedCategory!!.name}")
+        }
+        val contentResolver: ContentResolver = requireActivity().contentResolver
+
         if (isEditing) {
-            Log.d("AddEditExpense", "Updating expense: $expenseData")
-            if (expenseData != null) {
-                expenseViewModel.update(expenseData)
-            }
-            Toast.makeText(requireContext(), "Expense Updated", Toast.LENGTH_SHORT).show()
+            expenseViewModel.updateExpense(expenseToSave, currentPhotoUri, contentResolver)
         } else {
-            Log.d("AddEditExpense", "Inserting new expense: $expenseData")
-            if (expenseData != null) {
-                expenseViewModel.insert(expenseData)
-            }
-            Toast.makeText(requireContext(), "Expense Saved", Toast.LENGTH_SHORT).show()
+            expenseViewModel.insertExpense(expenseToSave, currentPhotoUri, contentResolver)
         }
 
-        // --- Navigate Back ---
-        findNavController().navigateUp()
     }
 
-    // --- Lifecycle ---
-    // override fun onDestroyView() {
-    //     super.onDestroyView()
-    //     _binding = null // Clean up View Binding
-    // }
-
-    // --- Fetch and Populate Logic ---
-    private fun fetchAndPopulateExpenseData() {
-        // Use coroutine scoped to the fragment's view lifecycle
-        viewLifecycleOwner.lifecycleScope.launch {
-            try {
-                existingExpense = expenseViewModel.getExpenseById(args.expenseId)
-                Log.d("AddEditExpense", "Fetched expense: $existingExpense")
-                if (existingExpense != null) {
-                    // Populate fields on the main thread
-                    populateFields(existingExpense!!)
-                } else {
-                    // Handle case where expense is not found (e.g., deleted elsewhere)
-                    Log.e("AddEditExpense", "Expense with ID ${args.expenseId} not found or doesn't belong to user.")
-                    Toast.makeText(requireContext(), "Error loading expense data.", Toast.LENGTH_SHORT).show()
-                    findNavController().navigateUp() // Go back
-                }
-            } catch (e: Exception) {
-                Log.e("AddEditExpense", "Error fetching expense", e)
-                Toast.makeText(requireContext(), "Error loading expense data.", Toast.LENGTH_SHORT).show()
-                findNavController().navigateUp() // Go back
-            }
-        }
-    }
 
     private fun populateFields(expense: Expense) {
+        Log.d("AddEditExpense", "Populating fields for expense: ${expense.description}")
         amountEditText.setText(expense.amount.toString())
         descriptionEditText.setText(expense.description)
 
-        // Set date
         selectedDateMillis = expense.date
-        updateDateDisplay() // Update the TextView
+        updateDateDisplay()
 
-        // Set category (requires categories to be loaded first)
-        // We might need to wait for the category list observer
-        val categoryIdToSelect = expense.categoryId
-        findAndSelectCategory(categoryIdToSelect) // Call helper to handle selection
+        // Category selection will be handled by observeCategoriesForDropdown
+        // when the category list is available. We just need to ensure
+        // findAndSelectCategoryInDropdown is called if editing.
+        if (categoryList.isNotEmpty()) { // If categories already loaded
+            findAndSelectCategoryInDropdown(expense.categoryId)
+        } // Else, observeCategoriesForDropdown will handle it when list arrives
 
-        // Set photo
-        if (!expense.photoUri.isNullOrEmpty()) {
-            currentPhotoUri = Uri.parse(expense.photoUri)
-            loadPhotoPreview(currentPhotoUri)
+        // Photo
+        if (!expense.photoStoragePath.isNullOrEmpty()) {
+            val imageUrl = SupabaseImageService.getImageUrl(expense.photoStoragePath!!)
+            Log.d("AddEditExpense", "Loading existing image from URL: $imageUrl")
+            Glide.with(this)
+                .load(imageUrl)
+                .placeholder(R.drawable.ic_image_placeholder) // Ensure these drawables exist
+                .error(R.drawable.ic_image_error)
+                .centerCrop()
+                .into(photoPreviewImageView)
+            photoPreviewImageView.visibility = View.VISIBLE
         } else {
-            currentPhotoUri = null
-            loadPhotoPreview(null)
+            photoPreviewImageView.visibility = View.GONE
+        }
+        currentPhotoUri = null // Reset any newly picked photo URI when populating existing data
+    }
+
+    private fun loadAndDisplayLastUsedCategoryButton() {
+        val prefs = requireActivity().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val lastUsedId = prefs.getString(LAST_USED_CATEGORY_ID_KEY, null)
+        val lastName = prefs.getString(LAST_USED_CATEGORY_NAME_KEY, null)
+
+        if (lastUsedId != null && lastName != null) {
+            buttonLastUsedCategory.text = "Use Last: $lastName"
+            buttonLastUsedCategory.visibility = View.VISIBLE
+        } else {
+            buttonLastUsedCategory.visibility = View.GONE
         }
     }
 
-    // Helper to select category once list is loaded
-    private fun findAndSelectCategory(categoryIdToSelect: Long) {
-        if (categoryList.isNotEmpty()) {
-            val category = categoryList.find { it.id == categoryIdToSelect }
-            if (category != null) {
-                selectedCategory = category
-                // Set the text in the AutoCompleteTextView. Must match an item in the adapter.
-                categoryAutoComplete.setText(category.name, false) // false = don't filter
-                categoryLayout.error = null // Clear potential error
-                Log.d("AddEditExpense", "Pre-selected category: ${category.name}")
-            } else {
-                Log.w("AddEditExpense", "Category ID $categoryIdToSelect not found in loaded list.")
-                categoryLayout.error = "Original category not found" // Show error
-                selectedCategory = null // Clear selection
+    private fun setupLastUsedCategoryButtonClickListener() {
+        buttonLastUsedCategory.setOnClickListener {
+            val prefs = requireActivity().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val lastUsedId = prefs.getString(LAST_USED_CATEGORY_ID_KEY, null)
+            if (lastUsedId != null && categoryList.isNotEmpty()) {
+                // Try to find and select this category in the current dropdown list
+                val categoryToSelect = categoryList.find { it.id == lastUsedId }
+                if (categoryToSelect != null) {
+                    selectedCategory = categoryToSelect
+                    categoryAutoComplete.setText(categoryToSelect.name, false) // Update dropdown
+                    categoryLayout.error = null
+                    Log.d("AddEditExpense", "Selected last used category: ${categoryToSelect.name}")
+                    Toast.makeText(context, "'${categoryToSelect.name}' selected", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(context, "Last used category not available", Toast.LENGTH_SHORT).show()
+                }
             }
-        } else {
-            // Categories not loaded yet, do nothing or schedule check?
-            // The observer will call this again when categories arrive if needed.
-            Log.d("AddEditExpense", "Categories not loaded yet, cannot pre-select category.")
         }
     }
+
 }

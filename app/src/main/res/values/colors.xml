@@ -12,4 +12,7 @@
     <color name="primaryDark">#67AE6E</color>
 
     <color name="grey_inactive">#757575</color>
+    <color name="red_warning">#D32F2F</color>
+    <color name="red_critical">#B71C1C</color>
+    <color name="green_success">#388E3C</color>
 </resources>

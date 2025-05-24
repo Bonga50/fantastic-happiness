@@ -25,6 +25,10 @@ materialVersion = "1.11.0"
 navigationFragment = "2.8.9"
 recyclerview = "1.4.0"
 roomRuntime = "2.7.1"
+storageKt = "3.2.0-beta-2"
+ktorClientCio = "3.1.3"
+kotlinSerialization = "2.2.0-RC"
+mpandroidchart = "v3.1.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -61,6 +65,10 @@ material = { group = "com.google.android.material", name = "material", version.r
 androidx-activity = { group = "androidx.activity", name = "activity", version.ref = "activity" }
 androidx-constraintlayout = { group = "androidx.constraintlayout", name = "constraintlayout", version.ref = "constraintlayout" }
 material-v1110 = { module = "com.google.android.material:material", version.ref = "materialVersion" }
+storage-kt = { group = "io.github.jan-tennert.supabase", name = "storage-kt", version.ref = "storageKt" }
+ktor-client-cio = { group = "io.ktor", name = "ktor-client-cio", version.ref = "ktorClientCio" }
+kotlin-serialization = { group = "org.jetbrains.kotlin", name = "kotlin-serialization", version.ref = "kotlinSerialization" }
+mpandroidchart = { group = "com.github.PhilJay", name = "MPAndroidchart", version.ref = "mpandroidchart" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

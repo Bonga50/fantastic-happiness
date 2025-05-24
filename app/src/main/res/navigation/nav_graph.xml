@@ -16,6 +16,11 @@
         android:name="com.example.allocate_optimize_track.CategoriesFragment"
         android:label="@string/menu_categories"
         tools:layout="@layout/fragment_categories" />
+    <fragment
+        android:id="@+id/nav_help_support"
+        android:name="com.example.allocate_optimize_track.HelpSupportFragment"
+        android:label="Help &amp; Support"
+        tools:layout="@layout/fragment_help_support" />
 
     <!-- Expenses Fragment Destination -->
     <fragment
@@ -42,8 +47,10 @@
     <!-- Arguments can be defined here if needed for editing later -->
         <argument
             android:name="expenseId"
-            app:argType="long"
-            android:defaultValue="-1L" />
+            app:argType="string"
+            app:nullable="true"
+        android:defaultValue="@null"
+        />
 </fragment>
 
 </navigation>
