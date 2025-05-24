@@ -1,17 +1,144 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.core.widget.NestedScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/primaryLight"
-    tools:context=".HomeFragment">
+    android:fillViewport="true"
+    android:background="@color/white"
+    >
 
-    <!-- TODO: Update blank fragment layout -->
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="16dp"
+        tools:context=".HomeFragment"> <!-- Make sure HomeFragment exists -->
+
+    <!-- Dashboard Title -->
     <TextView
+        android:id="@+id/textViewDashboardTitle"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:text="@string/title_home"
-        android:textAppearance="@style/TextAppearance.MaterialComponents.Headline5" />
+        android:text="Dashboard"
+        android:textAppearance="@style/TextAppearance.MaterialComponents.Headline5"
+        android:textColor="?android:attr/textColorPrimary"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
 
-</FrameLayout>
+        <TextView
+            android:id="@+id/textViewStreakDisplay"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle2"
+            android:textColor="@color/primaryDark"
+            app:drawableStartCompat="@drawable/local_fire_department_24px"
+            android:drawablePadding="4dp"
+            android:visibility="gone"
+            tools:text="Daily Streak: 5"
+            tools:visibility="visible"
+            app:layout_constraintTop_toBottomOf="@id/textViewDashboardTitle"
+            app:layout_constraintEnd_toEndOf="parent"
+            android:layout_marginTop="8dp" />
+
+    <!-- Date Filters for Graph -->
+    <TextView
+        android:id="@+id/textViewGraphDateFilterLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Spending Period:"
+        android:layout_marginTop="24dp"
+        android:textAppearance="@style/TextAppearance.MaterialComponents.Subtitle1"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/textViewDashboardTitle" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/buttonGraphStartDate"
+        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        app:icon="@drawable/calendar_month_24px"
+        android:text="From:"
+        android:textSize="12sp"
+        app:layout_constraintHorizontal_chainStyle="packed"
+        app:layout_constraintHorizontal_weight="1"
+        android:layout_marginTop="8dp"
+        android:layout_marginEnd="8dp"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toStartOf="@id/buttonGraphEndDate"
+        app:layout_constraintTop_toBottomOf="@id/textViewGraphDateFilterLabel" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/buttonGraphEndDate"
+        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        app:icon="@drawable/calendar_month_24px"
+        android:text="To:"
+        android:textSize="12sp"
+        app:layout_constraintHorizontal_weight="1"
+        android:layout_marginStart="8dp"
+        app:layout_constraintStart_toEndOf="@id/buttonGraphStartDate"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="@id/buttonGraphStartDate"
+        app:layout_constraintBottom_toBottomOf="@id/buttonGraphStartDate"/>
+
+    <TextView
+        android:id="@+id/textViewGraphDateRange"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:gravity="center"
+        android:textAppearance="@style/TextAppearance.MaterialComponents.Caption"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/buttonGraphStartDate"
+        tools:text="01 Apr 2024 - 30 Apr 2024" />
+
+    <!-- Spending Graph (MPAndroidChart LineChart or BarChart) -->
+    <com.github.mikephil.charting.charts.LineChart
+        android:id="@+id/spendingLineChart"
+        android:layout_width="0dp"
+        android:layout_height="250dp"
+        android:layout_marginTop="16dp"
+        app:layout_constraintTop_toBottomOf="@id/textViewGraphDateRange"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"/>
+    <!-- Or use a BarChart if you prefer -->
+    <!--
+    <com.github.mikephil.charting.charts.BarChart
+        android:id="@+id/spendingBarChart"
+        android:layout_width="0dp"
+        android:layout_height="250dp" ... />
+    -->
+
+    <!-- Budget Goals / Progress Section Title -->
+    <TextView
+        android:id="@+id/textViewBudgetProgressTitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Monthly Budget Progress"
+        android:layout_marginTop="32dp"
+        android:textAppearance="@style/TextAppearance.MaterialComponents.Headline6"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/spendingLineChart" />
+    <!-- Or below BarChart if using that -->
+
+    <!-- RecyclerView for Budget Goals -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/recyclerViewBudgetProgress"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        app:layout_constraintTop_toBottomOf="@id/textViewBudgetProgressTitle"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        android:nestedScrollingEnabled="false"
+        tools:listitem="@layout/item_budget_progress"
+        tools:itemCount="3"/>
+
+</androidx.constraintlayout.widget.ConstraintLayout>
+
+
+    </androidx.core.widget.NestedScrollView>

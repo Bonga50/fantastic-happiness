@@ -16,7 +16,14 @@
         android:title="@string/menu_expenses" />
 
     <item
+        android:id="@+id/nav_help_support"
+        android:icon="@drawable/help_24px"
+        android:title="@string/menu_help" />
+
+    <item
         android:id="@+id/nav_logout"
         android:icon="@drawable/logout_24px"
         android:title="@string/menu_logout" />
+
+
 </menu>
